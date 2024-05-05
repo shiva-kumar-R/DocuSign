@@ -11,6 +11,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -27,8 +29,8 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +53,9 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileNotFoundException
+import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
 
@@ -74,30 +79,55 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun Document_Preview(scanner: GmsDocumentScanner) {
     var imageUris by remember {
         mutableStateOf<List<Uri>>(emptyList())
     }
+    val scope = rememberCoroutineScope()
+    val snackBarHostState = remember { SnackbarHostState() }
+    val activity = LocalContext.current as MainActivity
 
     val scannerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
         onResult = {
             if (it.resultCode == RESULT_OK) {
                 val result = GmsDocumentScanningResult.fromActivityResultIntent(it.data)
-                imageUris = result?.pages?.map { it.imageUri } ?: emptyList()
+                imageUris = imageUris.let { existingUris ->
+                    result?.pages?.map { page -> page.imageUri }?.also {uris -> existingUris.toMutableList().addAll(uris) } ?: existingUris
+                }
 
                 result?.pdf?.let { pdf ->
-                    //val fos =
+                    try {
+                        val fos = FileOutputStream(
+                            File(
+                                activity.filesDir,
+                                "File_${System.currentTimeMillis()}.pdf"
+                            )
+                        )
+                        activity.contentResolver.openInputStream(pdf.uri)?.use {
+                            it.copyTo(fos)
+                        }
+                    } catch (e: FileNotFoundException) {
+                        scope.launch {
+                            snackBarHostState.showSnackbar(
+                                message = e.message ?: "Error",
+                                duration = SnackbarDuration.Long
+                            )
+                        }
+                    }
                 }
             }
         })
-    val scope = rememberCoroutineScope()
-    val snackBarHostState = remember { SnackbarHostState() }
-    val activity = LocalContext.current as MainActivity
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(text = "Document Scanner") }
+            )
+        },
         snackbarHost = { SnackbarHost(hostState = snackBarHostState) },
         floatingActionButtonPosition = FabPosition.Center,
         floatingActionButton = {
@@ -143,7 +173,9 @@ fun Document_Preview(scanner: GmsDocumentScanner) {
                     model = uri,
                     contentDescription = null,
                     contentScale = ContentScale.FillBounds,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(45.dp, 45.dp)
                 )
             }
         }
